@@ -15,7 +15,11 @@ func main() {
 
 	r.POST("/user/create", controllers.CreateUser)
 	r.POST("/onramp/inr", controllers.OnrampUser)
-	r.POST("/balance/inr", controllers.GetBalances)
-	r.POST("/balance/inr/:userId", controllers.GetUserBalance)
+	r.GET("/balance/inr", controllers.GetBalances)
+	r.GET("/balance/inr/:userId", controllers.GetUserBalance)
+	r.GET("/symbol/create", controllers.CreateSymbol)
+	r.GET("/orderbook/getorder", controllers.GetOrderBooks)
+	r.GET("/getUserStock/:userId", controllers.GetUserStock)
+	r.GET("/getStocks", controllers.GetStocks)
 	r.Run(":8080")
 }
