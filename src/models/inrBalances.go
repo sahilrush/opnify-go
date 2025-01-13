@@ -7,9 +7,9 @@ type UserBalance struct {
 
 var UserWithBalance = make(map[string]UserBalance)
 
-type OnRampedUser struct {
-	userId string `json:"userid" binding:"required"`
-	amount int    `json:"amount" binding:"required"`
+type OnrampUser struct {
+	UserId string `json:"userId" binding:"required"`
+	Amount int    `json:"amount" binding:"required"`
 }
 
 var INR_BALANCES = UserWithBalance
