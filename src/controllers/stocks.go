@@ -62,6 +62,32 @@ func GetOrderBooks(c *gin.Context) {
 	})
 
 }
+func viewOrderbook(c *gin.Context) {
+	symbol := c.Param("symbol")
+	if symbol == "" {
+		c.JSON(http.StatusBadRequest, models.UserResponse{
+			Success: false,
+			Message: "Symbol is required",
+			Data:    nil,
+		})
+		return
+	}
+	orderbook, exists := ORDERBOOKS[symbol]
+	if !exists {
+		c.JSON(http.StatusOK, models.UserResponse{
+			Success: false,
+			Message: "no orderbook found for given symbol",
+			Data:    nil,
+		})
+		return
+	}
+
+	c.JSON(http.StatusBadRequest, models.UserResponse{
+		Success: true,
+		Message: "Here is the Orderbook",
+		Data:    orderbook,
+	})
+}
 
 func GetStocks(c *gin.Context) {
 	if len(STOCK_BALANCES) == 0 {
