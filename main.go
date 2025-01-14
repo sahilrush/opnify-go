@@ -18,7 +18,7 @@ func main() {
 	r.GET("/balance/inr", controllers.GetBalances)
 	r.GET("/balance/inr/:userId", controllers.GetUserBalance)
 	r.POST("/symbol/create", controllers.CreateSymbol)
-	r.GET("/orderbook/:symbol", controllers.viewOrderbook)
+	r.GET("/orderbook/:symbol", controllers.ViewOrderbook)
 	r.GET("/orderbook/getorder", controllers.GetOrderBooks)
 	r.GET("/getUserStock/:userId", controllers.GetUserStock)
 	r.GET("/getStocks", controllers.GetStocks)

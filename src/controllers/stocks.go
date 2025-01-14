@@ -25,35 +25,50 @@ func CreateSymbol(c *gin.Context) {
 		return
 	}
 
-	if _, exists := ORDERBOOKS[payload.Stock]; exists {
+	// Check if the stock already exists
+	if _, exists := models.Orderbooks[payload.Stock]; exists {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
-			Message: "stock already exists",
-			Data:    ORDERBOOKS[payload.Stock],
+			Message: "Stock already exists",
+			Data:    models.Orderbooks[payload.Stock],
 		})
 		return
 	}
 
-	ORDERBOOKS[payload.Stock] = models.Pricing{
+	// Initialize the orderbook for the stock
+	models.Orderbooks[payload.Stock] = models.Pricing{
 		Yes: make(map[int]models.OrderType),
 		No:  make(map[int]models.OrderType),
 	}
 
+	// Initialize the stock balance for the user and stock
+	if _, exists := models.Stock_Balances[payload.Stock]; !exists {
+		models.Stock_Balances[payload.Stock] = map[string]models.Stocksymbol{}
+	}
+
+	// Initialize the user's stock symbol if not present
+	if _, exists := models.Stock_Balances[payload.Stock][payload.UserId]; !exists {
+		models.Stock_Balances[payload.Stock][payload.UserId] = map[string]models.OutCome{
+			"yes": {Quantity: 100, Locked: 0}, // Initialize with 100 units
+			"no":  {Quantity: 100, Locked: 0}, // Initialize with 100 units
+		}
+	}
+
 	c.JSON(http.StatusOK, models.UserResponse{
 		Success: true,
-		Message: "Symbol created succefully",
-		Data:    ORDERBOOKS[payload.Stock],
+		Message: "Symbol created successfully",
+		Data:    models.Orderbooks[payload.Stock],
 	})
-
 }
 
 func GetOrderBooks(c *gin.Context) {
 	if len(ORDERBOOKS) == 0 {
-		c.JSON(http.StatusOK, models.UserResponse{
+		c.JSON(http.StatusNotFound, models.UserResponse{
 			Success: false,
 			Message: "no orderbook available",
 			Data:    nil,
 		})
+		return
 	}
 	c.JSON(http.StatusOK, models.UserResponse{
 		Success: true,
@@ -62,7 +77,7 @@ func GetOrderBooks(c *gin.Context) {
 	})
 
 }
-func viewOrderbook(c *gin.Context) {
+func ViewOrderbook(c *gin.Context) {
 	symbol := c.Param("symbol")
 	if symbol == "" {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
@@ -82,9 +97,9 @@ func viewOrderbook(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusBadRequest, models.UserResponse{
+	c.JSON(http.StatusOK, models.UserResponse{
 		Success: true,
-		Message: "Here is the Orderbook",
+		Message: "Here is the Orderbook " + symbol,
 		Data:    orderbook,
 	})
 }

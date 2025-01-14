@@ -1,7 +1,5 @@
 package models
 
-import "sync"
-
 type YesPayload struct {
 	UserId      string `json:"userId"`
 	Stocksymbol string `json:"stocksymbol"`
@@ -31,5 +29,3 @@ type BuyNo struct {
 	Quantity    int    `json:"quantity"`
 	StockType   string `json:"stocktype"`
 }
-
-var StockBalancesMutex = sync.RWMutex{}

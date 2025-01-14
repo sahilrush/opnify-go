@@ -8,7 +8,6 @@ import (
 )
 
 func SellYes(c *gin.Context) {
-	// Define a local struct for the payload
 	type YesPayload struct {
 		UserId   string `json:"userId" binding:"required"`
 		Stock    string `json:"stock" binding:"required"`
@@ -17,8 +16,6 @@ func SellYes(c *gin.Context) {
 	}
 
 	var payload YesPayload
-
-	// Bind the incoming JSON payload to the YesPayload struct
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
@@ -28,42 +25,41 @@ func SellYes(c *gin.Context) {
 		return
 	}
 
-	// Check if the user has stock balance
-	userStock, ok := models.Stock_Balances[payload.UserId]
-	if !ok {
-		c.JSON(http.StatusNotFound, models.UserResponse{
+	if payload.Quantity <= 0 {
+		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
-			Message: "No stock available",
+			Message: "Quantity must be greater than zero",
 			Data:    nil,
 		})
 		return
 	}
 
-	// Check if the user has stock for the given symbol
-	stockSymbol, ok := userStock[payload.Stock]
+	// Get user's stock balance
+	userStock, ok := models.Stock_Balances[payload.Stock]
 	if !ok {
 		c.JSON(http.StatusNotFound, models.UserResponse{
 			Success: false,
-			Message: "No stock available for this movement",
+			Message: "No stock available for this symbol",
+			Data:    nil,
 		})
 		return
 	}
 
-	// Check if the user has "yes" stock
+	stockSymbol, ok := userStock[payload.UserId]
+	if !ok {
+		c.JSON(http.StatusNotFound, models.UserResponse{
+			Success: false,
+			Message: "No stock available for this user",
+			Data:    nil,
+		})
+		return
+	}
+
 	outcome, ok := stockSymbol["yes"]
-	if !ok {
-		c.JSON(http.StatusNotFound, models.UserResponse{
-			Success: false,
-			Message: "No stock available",
-		})
-		return
-	}
-
-	// Verify if the user has enough stock to sell
-	if outcome.Quantity < payload.Quantity {
+	if !ok || outcome.Quantity < payload.Quantity {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
-			Message: "User doesn't have enough stock",
+			Message: "Insufficient stock quantity",
 			Data:    nil,
 		})
 		return
@@ -73,48 +69,50 @@ func SellYes(c *gin.Context) {
 	outcome.Locked += payload.Quantity
 	outcome.Quantity -= payload.Quantity
 	stockSymbol["yes"] = outcome
+	userStock[payload.UserId] = stockSymbol
+	models.Stock_Balances[payload.Stock] = userStock
 
-	// Get or initialize the order book for the given stock symbol
-	orderbooks, ok := models.Orderbooks[payload.Stock]
-	if !ok {
-		orderbooks = models.Pricing{
+	// Initialize or get orderbook
+	orderbook, exists := models.Orderbooks[payload.Stock]
+	if !exists {
+		orderbook = models.Pricing{
 			Yes: make(map[int]models.OrderType),
 			No:  make(map[int]models.OrderType),
 		}
-		models.Orderbooks[payload.Stock] = orderbooks
 	}
 
-	// Get or initialize the order type for the given price
-	yesOrders, ok := orderbooks.Yes[payload.Price]
-	if !ok {
-		yesOrders = models.OrderType{
+	// Initialize or get the price level in YES orderbook
+	priceLevel, exists := orderbook.Yes[payload.Price]
+	if !exists {
+		priceLevel = models.OrderType{
 			Total:  0,
 			Orders: make(map[string]models.Orders),
 		}
-		orderbooks.Yes[payload.Price] = yesOrders
 	}
 
-	// Get or initialize the user's specific order
-	userOrder, ok := yesOrders.Orders[payload.UserId]
-	if !ok {
+	// Update user's order
+	userOrder, exists := priceLevel.Orders[payload.UserId]
+	if !exists {
 		userOrder = models.Orders{
 			Quantity: 0,
-			Type:     "normal",
+			Type:     "sell",
 		}
-		yesOrders.Orders[payload.UserId] = userOrder
 	}
 
-	// Update the order book
-	yesOrders.Total += payload.Quantity
 	userOrder.Quantity += payload.Quantity
-	yesOrders.Orders[payload.UserId] = userOrder
-	orderbooks.Yes[payload.Price] = yesOrders
-	models.Orderbooks[payload.Stock] = orderbooks
+	priceLevel.Orders[payload.UserId] = userOrder
+	priceLevel.Total += payload.Quantity
 
-	// Return the success response
+	// Update the orderbook
+	orderbook.Yes[payload.Price] = priceLevel
+	models.Orderbooks[payload.Stock] = orderbook
+
 	c.JSON(http.StatusOK, models.UserResponse{
 		Success: true,
 		Message: "Stock sold successfully",
-		Data:    models.Orderbooks[payload.Stock],
+		Data: map[string]interface{}{
+			"orderbook":         models.Orderbooks[payload.Stock],
+			"remaining_balance": outcome,
+		},
 	})
 }
