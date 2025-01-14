@@ -17,7 +17,7 @@ func main() {
 	r.POST("/onramp/inr", controllers.OnrampUser)
 	r.GET("/balance/inr", controllers.GetBalances)
 	r.GET("/balance/inr/:userId", controllers.GetUserBalance)
-	r.GET("/symbol/create", controllers.CreateSymbol)
+	r.POST("/symbol/create", controllers.CreateSymbol)
 	r.GET("/orderbook/getorder", controllers.GetOrderBooks)
 	r.GET("/getUserStock/:userId", controllers.GetUserStock)
 	r.GET("/getStocks", controllers.GetStocks)
