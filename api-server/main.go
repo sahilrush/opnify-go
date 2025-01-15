@@ -29,3 +29,9 @@ func main() {
 	//viewOrderbook
 	r.Run(":8080")
 }
+
+
+
+//redis pubsub queue and subscribe should be http.Error
+//(w, err.Error(), http.StatusInternalServerError)
+//it will push to redis queue and it will subscribe to channel
