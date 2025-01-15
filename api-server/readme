@@ -1,0 +1,8 @@
+go routines are not using till no mutex
+1 stock symbol
+
+orderbook mutlitple stock symbol
+first req stock symbol a buy if i take 2
+
+another worker for 
+redis on another folder
