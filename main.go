@@ -23,6 +23,8 @@ func main() {
 	r.GET("/getUserStock/:userId", controllers.GetUserStock)
 	r.GET("/getStocks", controllers.GetStocks)
 	r.POST("/sellyes", controllers.SellYes)
+	r.POST("/sellno", controllers.SellNo)
+
 	//viewOrderbook
 	r.Run(":8080")
 }
