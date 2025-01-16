@@ -1,1 +1,0 @@
-# opnify-go
