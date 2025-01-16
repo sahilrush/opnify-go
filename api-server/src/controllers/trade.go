@@ -245,10 +245,10 @@ func SellNo(c *gin.Context) {
 	})
 
 }
-
 func BuyYes(c *gin.Context) {
 	var payload models.BuyYes
 
+	// Bind JSON payload to the BuyYes structure
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
@@ -257,8 +257,6 @@ func BuyYes(c *gin.Context) {
 		})
 		return
 	}
-
-	fmt.Printf("Received payload: %+v\n", payload)
 
 	// Validate required fields
 	if payload.Stock == "" || payload.Price <= 0 ||
@@ -271,127 +269,95 @@ func BuyYes(c *gin.Context) {
 		})
 		return
 	}
-	// Initialize INR_BALANCES map if it doesn't exist
-	if models.INR_BALANCES == nil {
-		models.INR_BALANCES = make(map[string]models.UserBalance)
-		fmt.Println("Initialized INR_BALANCES map")
-	}
 
-	// Get or initialize user balance
+	// Check if the user exists in INR_BALANCES
 	user, exists := models.INR_BALANCES[payload.UserId]
 	if !exists {
-		// Initialize new user with 10000 balance
+		// Initialize the user if not found
 		user = models.UserBalance{
-			Balance: 10000, // Default starting balance
+			Balance: 10000, // Set a default balance
 			Locked:  0,
 		}
 		models.INR_BALANCES[payload.UserId] = user
-		fmt.Printf("Initialized new user %s with balance %+v\n", payload.UserId, user)
 	}
 
-	// Calculate total cost
+	// Calculate total cost of the buy operation
 	totalCost := float64(payload.Price * payload.Quantity)
-	fmt.Printf("Total cost of transaction: %v\n", totalCost)
-
-	// Check if user has sufficient balance
 	if user.Balance < int(totalCost) {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
-			Message: "Insufficient balance of user",
+			Message: "Insufficient balance",
 			Data: map[string]interface{}{
 				"required":  totalCost,
 				"available": user.Balance,
-				"userId":    payload.UserId,
 			},
 		})
 		return
 	}
 
-	// Initialize Orderbooks if nil
+	// Initialize or get the orderbook for the specified stock
 	if models.Orderbooks == nil {
 		models.Orderbooks = make(map[string]models.Pricing)
 	}
 
-	// Initialize the order book if it doesn't exist
+	// Check if stock exists in the orderbook, else create a new entry
 	if _, exists := models.Orderbooks[payload.Stock]; !exists {
 		models.Orderbooks[payload.Stock] = models.Pricing{
 			Yes: make(map[int]models.OrderType),
 			No:  make(map[int]models.OrderType),
 		}
 	}
+
 	pricing := models.Orderbooks[payload.Stock]
-	if pricing.Yes == nil {
-		pricing.Yes = make(map[int]models.OrderType)
-		models.Orderbooks[payload.Stock] = pricing
-	}
-	if pricing.No == nil {
-		pricing.No = make(map[int]models.OrderType)
-		models.Orderbooks[payload.Stock] = pricing
-	}
 
-	_, priceExists := models.Orderbooks[payload.Stock].Yes[payload.Price]
-	newPrice := 1000 - payload.Price
-	if !priceExists {
-		// Debug log
-		fmt.Printf("Creating new order at price %d\n", newPrice)
+	// Calculate 'NO' price based on 'YES' price
+	newPrice := 10 - payload.Price // Fixed difference (e.g., 10 - YES price)
 
-		pricing := models.Orderbooks[payload.Stock]
-		if _, noPriceExists := pricing.No[newPrice]; !noPriceExists {
-			pricing.No[newPrice] = models.OrderType{
-				Total:  0,
-				Orders: make(map[string]models.Orders),
-			}
-		}
-
-		orderType := pricing.No[newPrice]
-		if order, orderExists := orderType.Orders[payload.UserId]; orderExists {
-			order.Quantity += payload.Quantity
-			order.Type = "inverse"
-			orderType.Orders[payload.UserId] = order
-			orderType.Total += payload.Quantity
-			pricing.No[newPrice] = orderType
-			models.Orderbooks[payload.Stock] = pricing
-
-			user.Locked += int(totalCost)
-			user.Balance -= int(totalCost)
-			models.INR_BALANCES[payload.UserId] = user
-
-			// Debug log
-			fmt.Printf("Updated order: %+v\n", order)
-			fmt.Printf("Updated user balance: %+v\n", user)
-
-			c.JSON(http.StatusOK, models.UserResponse{
-				Success: true,
-				Message: "Orderbook updated",
-				Data:    order,
-			})
-			return
-		} else {
-			newOrder := models.Orders{
-				Quantity: payload.Quantity,
-				Type:     "inverse",
-			}
-			orderType.Orders[payload.UserId] = newOrder
-			orderType.Total += payload.Quantity
-			pricing.No[newPrice] = orderType
-			models.Orderbooks[payload.Stock] = pricing
-
-			user.Locked += int(totalCost)
-			user.Balance -= int(totalCost)
-			models.INR_BALANCES[payload.UserId] = user
-
-			// Debug log
-			fmt.Printf("Created new order: %+v\n", newOrder)
-			fmt.Printf("Updated user balance: %+v\n", user)
-
-			c.JSON(http.StatusOK, models.UserResponse{
-				Success: true,
-				Message: "Orderbook created",
-				Data:    models.Orderbooks[payload.Stock],
-			})
-			return
+	if _, exists := pricing.No[newPrice]; !exists {
+		pricing.No[newPrice] = models.OrderType{
+			Total:  0,
+			Orders: make(map[string]models.Orders),
 		}
 	}
+
+	// Create or update the inverse order on the 'no' side of the book
+	orderType := pricing.No[newPrice]
+	order := models.Orders{
+		Quantity: payload.Quantity,
+		Type:     "inverse",
+	}
+
+	// Update or create order in the orderbook for user at this price level
+	if existingOrder, exists := orderType.Orders[payload.UserId]; exists {
+		// If user already has an order at this price, increase the quantity
+		existingOrder.Quantity += payload.Quantity
+		orderType.Orders[payload.UserId] = existingOrder
+	} else {
+		// Create new order for user if not exists
+		orderType.Orders[payload.UserId] = order
+	}
+
+	// Update the total quantity of orders at this price level
+	orderType.Total += payload.Quantity
+
+	// Save the updated order in the orderbook
+	pricing.No[newPrice] = orderType
+	models.Orderbooks[payload.Stock] = pricing
+
+	// Lock funds and update user balance
+	user.Locked += int(totalCost)
+	user.Balance -= int(totalCost)
+	models.INR_BALANCES[payload.UserId] = user
+
+	// Debug logs
+	fmt.Printf("Orderbook after updating: %+v\n", models.Orderbooks[payload.Stock])
+
+	// Return success response
+	c.JSON(http.StatusOK, models.UserResponse{
+		Success: true,
+		Message: "Orderbook updated successfully",
+		Data:    models.Orderbooks[payload.Stock],
+	})
 }
 
 func BuyNo(c *gin.Context) {
