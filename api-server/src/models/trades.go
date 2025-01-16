@@ -1,10 +1,10 @@
 package models
 
 type YesPayload struct {
-	UserId      string `json:"userId"`
-	Stocksymbol string `json:"stocksymbol"`
-	Price       int    `json:"price"`
-	Quantity    int    `json:"quantity"`
+	UserId   string `json:"userId"`
+	Stock    string `json:"stock"`
+	Price    int    `json:"price"`
+	Quantity int    `json:"quantity"`
 }
 
 type NoPayload struct {
@@ -15,17 +15,17 @@ type NoPayload struct {
 }
 
 type BuyYes struct {
-	UserId      string `json:"userid"`
-	Stocksymbol string `json:"stocksymbol"`
-	Price       int    `json:"price"`
-	Quantity    int    `json:"quantity"`
-	StockType   string `json:"stocktype"`
+	UserId    string `json:"userid"`
+	Stock     string `json:"stock"`
+	Price     int    `json:"price"`
+	Quantity  int    `json:"quantity"`
+	StockType string `json:"stocktype"`
 }
 
 type BuyNo struct {
-	UserId      string `json:"userid"`
-	Stocksymbol string `json:"stocksymbol"`
-	Price       int    `json:"price"`
-	Quantity    int    `json:"quantity"`
-	StockType   string `json:"stocktype"`
+	UserId    string `json:"userid"`
+	Stock     string `json:"stock"`
+	Price     int    `json:"price"`
+	Quantity  int    `json:"quantity"`
+	StockType string `json:"stocktype"`
 }

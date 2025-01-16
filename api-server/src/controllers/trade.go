@@ -9,14 +9,8 @@ import (
 )
 
 func SellYes(c *gin.Context) {
-	type YesPayload struct {
-		UserId   string `json:"userId" binding:"required"`
-		Stock    string `json:"stock" binding:"required"`
-		Price    int    `json:"price" binding:"required"`
-		Quantity int    `json:"quantity" binding:"required"`
-	}
 
-	var payload YesPayload
+	var payload models.YesPayload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
@@ -51,7 +45,7 @@ func SellYes(c *gin.Context) {
 	// Debug: Print user stock state
 	fmt.Printf("User stock found. Available users: %v\n", getKeys(userStock))
 
-	stockSymbol, ok := userStock[payload.UserId]
+	stock, ok := userStock[payload.UserId]
 	if !ok {
 		c.JSON(http.StatusNotFound, models.UserResponse{
 			Success: false,
@@ -62,14 +56,14 @@ func SellYes(c *gin.Context) {
 	}
 
 	// Debug: Print outcome state
-	fmt.Printf("Stock symbol found. Available types: %v\n", getKeys(stockSymbol))
+	fmt.Printf("Stock symbol found. Available types: %v\n", getKeys(stock))
 
-	outcome, ok := stockSymbol["yes"]
+	outcome, ok := stock["yes"]
 	if !ok {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
 			Message: "No YES tokens available",
-			Data:    fmt.Sprintf("Available token types: %v", getKeys(stockSymbol)),
+			Data:    fmt.Sprintf("Available token types: %v", getKeys(stock)),
 		})
 		return
 	}
@@ -94,8 +88,8 @@ func SellYes(c *gin.Context) {
 	// Rest of your existing code for updating balances...
 	outcome.Locked += payload.Quantity
 	outcome.Quantity -= payload.Quantity
-	stockSymbol["yes"] = outcome
-	userStock[payload.UserId] = stockSymbol
+	stock["yes"] = outcome
+	userStock[payload.UserId] = stock
 	models.Stock_Balances[payload.Stock] = userStock
 
 	// Initialize orderbook price level if it doesn't exist
@@ -167,7 +161,7 @@ func SellNo(c *gin.Context) {
 	}
 
 	// Check if user has any stocks
-	stockSymbol, ok := userStock[payload.UserId]
+	stock, ok := userStock[payload.UserId]
 	if !ok {
 		c.JSON(http.StatusNotFound, models.UserResponse{
 			Success: false,
@@ -178,7 +172,7 @@ func SellNo(c *gin.Context) {
 	}
 
 	// Check if "NO" tokens exist for the user
-	outcome, ok := stockSymbol["no"]
+	outcome, ok := stock["no"]
 	if !ok {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
@@ -205,8 +199,8 @@ func SellNo(c *gin.Context) {
 	// Update user's stock balance
 	outcome.Locked += payload.Quantity
 	outcome.Quantity -= payload.Quantity
-	stockSymbol["no"] = outcome
-	userStock[payload.UserId] = stockSymbol
+	stock["no"] = outcome
+	userStock[payload.UserId] = stock
 	models.Stock_Balances[payload.Stock] = userStock
 
 	// Initialize or get orderbook for the stock symbol
@@ -255,7 +249,6 @@ func SellNo(c *gin.Context) {
 func BuyYes(c *gin.Context) {
 	var payload models.BuyYes
 
-	// Bind and validate the incoming JSON payload
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
@@ -265,11 +258,12 @@ func BuyYes(c *gin.Context) {
 		return
 	}
 
+	fmt.Printf("Received payload: %+v\n", payload)
+
 	// Validate required fields
-	if payload.Stocksymbol == "" || payload.Price <= 0 ||
+	if payload.Stock == "" || payload.Price <= 0 ||
 		payload.UserId == "" || payload.Quantity <= 0 ||
 		payload.StockType == "" {
-
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
 			Message: "Invalid request: All fields must be provided with valid values",
@@ -277,137 +271,132 @@ func BuyYes(c *gin.Context) {
 		})
 		return
 	}
+	// Initialize INR_BALANCES map if it doesn't exist
+	if models.INR_BALANCES == nil {
+		models.INR_BALANCES = make(map[string]models.UserBalance)
+		fmt.Println("Initialized INR_BALANCES map")
+	}
 
-	user := models.INR_BALANCES[payload.UserId]
-	if user.Balance < payload.Price*payload.Quantity {
+	// Get or initialize user balance
+	user, exists := models.INR_BALANCES[payload.UserId]
+	if !exists {
+		// Initialize new user with 10000 balance
+		user = models.UserBalance{
+			Balance: 10000, // Default starting balance
+			Locked:  0,
+		}
+		models.INR_BALANCES[payload.UserId] = user
+		fmt.Printf("Initialized new user %s with balance %+v\n", payload.UserId, user)
+	}
+
+	// Calculate total cost
+	totalCost := float64(payload.Price * payload.Quantity)
+	fmt.Printf("Total cost of transaction: %v\n", totalCost)
+
+	// Check if user has sufficient balance
+	if user.Balance < int(totalCost) {
 		c.JSON(http.StatusBadRequest, models.UserResponse{
 			Success: false,
 			Message: "Insufficient balance of user",
-			Data:    nil,
+			Data: map[string]interface{}{
+				"required":  totalCost,
+				"available": user.Balance,
+				"userId":    payload.UserId,
+			},
 		})
 		return
 	}
 
+	// Initialize Orderbooks if nil
+	if models.Orderbooks == nil {
+		models.Orderbooks = make(map[string]models.Pricing)
+	}
+
 	// Initialize the order book if it doesn't exist
-	_, exists := models.Orderbooks[payload.Stocksymbol]
-	if !exists {
-		models.Orderbooks[payload.Stocksymbol] = models.Pricing{
+	if _, exists := models.Orderbooks[payload.Stock]; !exists {
+		models.Orderbooks[payload.Stock] = models.Pricing{
 			Yes: make(map[int]models.OrderType),
 			No:  make(map[int]models.OrderType),
 		}
 	}
-
-	if models.Orderbooks[payload.Stocksymbol].Yes == nil {
-		models.Orderbooks[payload.Stocksymbol] = models.Pricing{
-			Yes: make(map[int]models.OrderType),
-		}
+	pricing := models.Orderbooks[payload.Stock]
+	if pricing.Yes == nil {
+		pricing.Yes = make(map[int]models.OrderType)
+		models.Orderbooks[payload.Stock] = pricing
+	}
+	if pricing.No == nil {
+		pricing.No = make(map[int]models.OrderType)
+		models.Orderbooks[payload.Stock] = pricing
 	}
 
-	_, priceExists := models.Orderbooks[payload.Stocksymbol].Yes[payload.Price]
+	_, priceExists := models.Orderbooks[payload.Stock].Yes[payload.Price]
 	newPrice := 1000 - payload.Price
 	if !priceExists {
-		if _, noPriceExists := models.Orderbooks[payload.Stocksymbol].No[newPrice]; !noPriceExists {
-			models.Orderbooks[payload.Stocksymbol].No[newPrice] = models.OrderType{
+		// Debug log
+		fmt.Printf("Creating new order at price %d\n", newPrice)
+
+		pricing := models.Orderbooks[payload.Stock]
+		if _, noPriceExists := pricing.No[newPrice]; !noPriceExists {
+			pricing.No[newPrice] = models.OrderType{
 				Total:  0,
 				Orders: make(map[string]models.Orders),
 			}
 		}
 
-		newOrder, orderExists := models.Orderbooks[payload.Stocksymbol].No[newPrice].Orders[payload.UserId]
-		if orderExists {
-			newOrder.Quantity += payload.Quantity
-			newOrder.Type = "inverse"
+		orderType := pricing.No[newPrice]
+		if order, orderExists := orderType.Orders[payload.UserId]; orderExists {
+			order.Quantity += payload.Quantity
+			order.Type = "inverse"
+			orderType.Orders[payload.UserId] = order
+			orderType.Total += payload.Quantity
+			pricing.No[newPrice] = orderType
+			models.Orderbooks[payload.Stock] = pricing
 
-			existingOrder := models.Orderbooks[payload.Stocksymbol].No[newPrice]
-			existingOrder.Total += payload.Quantity
-			user.Locked += payload.Price * payload.Quantity
-			user.Balance -= payload.Price * payload.Quantity
+			user.Locked += int(totalCost)
+			user.Balance -= int(totalCost)
+			models.INR_BALANCES[payload.UserId] = user
+
+			// Debug log
+			fmt.Printf("Updated order: %+v\n", order)
+			fmt.Printf("Updated user balance: %+v\n", user)
 
 			c.JSON(http.StatusOK, models.UserResponse{
 				Success: true,
 				Message: "Orderbook updated",
-				Data:    newOrder,
+				Data:    order,
 			})
 			return
 		} else {
-			newBook := models.Orderbooks[payload.Stocksymbol].No[newPrice].Orders[payload.UserId]
-			newBook.Quantity += payload.Quantity
-			newBook.Type = "inverse"
+			newOrder := models.Orders{
+				Quantity: payload.Quantity,
+				Type:     "inverse",
+			}
+			orderType.Orders[payload.UserId] = newOrder
+			orderType.Total += payload.Quantity
+			pricing.No[newPrice] = orderType
+			models.Orderbooks[payload.Stock] = pricing
 
-			copiedBook := models.Orderbooks[payload.Stocksymbol].No[newPrice]
-			copiedBook.Total += payload.Quantity
-			user.Locked += payload.Price * payload.Quantity
-			user.Balance -= payload.Price * payload.Quantity
+			user.Locked += int(totalCost)
+			user.Balance -= int(totalCost)
+			models.INR_BALANCES[payload.UserId] = user
+
+			// Debug log
+			fmt.Printf("Created new order: %+v\n", newOrder)
+			fmt.Printf("Updated user balance: %+v\n", user)
 
 			c.JSON(http.StatusOK, models.UserResponse{
 				Success: true,
-				Message: "Orderbook",
-				Data:    models.Orderbooks[payload.Stocksymbol],
+				Message: "Orderbook created",
+				Data:    models.Orderbooks[payload.Stock],
 			})
 			return
 		}
 	}
-
-	// Handle existing orders
-	if orders, ok := models.Orderbooks[payload.Stocksymbol].Yes[payload.Price]; ok {
-		totalAmount := payload.Quantity
-		for userId, order := range orders.Orders {
-			if totalAmount <= 0 {
-				break
-			}
-			currentQuantity := order.Quantity
-			subtraction := min(totalAmount, currentQuantity)
-			existingUser := models.INR_BALANCES[userId]
-			existingUser.Balance += payload.Price * subtraction
-			models.INR_BALANCES[userId] = existingUser
-
-			newUser := models.Orderbooks[payload.Stocksymbol].Yes[payload.Price].Orders[userId]
-			newUser.Quantity -= subtraction
-			totalAmount -= subtraction
-
-			if _, exists := models.Stock_Balances[payload.UserId]; !exists {
-				models.Stock_Balances[payload.UserId] = make(map[string]models.Stocksymbol)
-			}
-
-			if stocks, exists := models.Stock_Balances[payload.UserId][payload.Stocksymbol]; !exists {
-				stocks[payload.Stocksymbol] = models.OutCome{
-					Quantity: 0,
-					Locked:   0,
-				}
-			}
-			existingStock := models.Stock_Balances[payload.UserId][payload.Stocksymbol]["yes"]
-			existingStock.Quantity -= subtraction
-		}
-
-		orderbook := models.Orderbooks[payload.Stocksymbol].Yes[payload.Price]
-		orderbook.Total -= payload.Quantity - totalAmount
-		if orderbook.Total == 0 {
-			delete(models.Orderbooks[payload.Stocksymbol].Yes, payload.Price)
-		}
-		user.Balance -= payload.Price * payload.Quantity
-	} else {
-		user.Balance -= payload.Price * payload.Quantity
-		user.Locked += payload.Price * payload.Quantity
-		models.INR_BALANCES[payload.UserId] = user
-	}
-
-	c.JSON(http.StatusOK, models.UserResponse{
-		Success: true,
-		Message: "Orderbook",
-		Data:    models.Orderbooks[payload.Stocksymbol],
-	})
 }
+
 func BuyNo(c *gin.Context) {
 
-	type BuyNo struct {
-		UserId    string `json:"userid"`
-		Stock     string `json:"stock"`
-		Price     int    `json:"price"`
-		Quantity  int    `json:"quantity"`
-		StockType string `json:"stocktype"`
-	}
-
-	var payload BuyNo
+	var payload models.BuyNo
 	// Bind the JSON request body to the payload struct
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
