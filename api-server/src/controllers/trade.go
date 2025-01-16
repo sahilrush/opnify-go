@@ -253,7 +253,6 @@ func SellNo(c *gin.Context) {
 }
 
 func BuyYes(c *gin.Context) {
-
 	type BuyYes struct {
 		UserId    string `json:"userid"`
 		Stock     string `json:"stock"`
@@ -264,7 +263,6 @@ func BuyYes(c *gin.Context) {
 
 	var payload BuyYes
 
-	// Bind the JSON request body to the payload struct
 	if err := c.ShouldBindJSON(&payload); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -274,11 +272,9 @@ func BuyYes(c *gin.Context) {
 		return
 	}
 
-	// Validate the payload
 	if payload.Stock == "" || payload.Price <= 0 ||
 		payload.UserId == "" || payload.Quantity <= 0 ||
 		payload.StockType == "" {
-
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "Invalid request: All fields must be provided with valid values",
@@ -287,7 +283,7 @@ func BuyYes(c *gin.Context) {
 		return
 	}
 
-	user := models.INR_BALANCES[payload.UserId]
+	user := Users[payload.UserId]
 	if user.Balance < payload.Price*payload.Quantity {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
@@ -297,129 +293,161 @@ func BuyYes(c *gin.Context) {
 		return
 	}
 
-	_, exists := models.Orderbooks[payload.Stock]
+	// Initialize orderbook if it doesn't exist
+	orderbook, exists := models.Orderbooks[payload.Stock]
 	if !exists {
-		models.Orderbooks[payload.Stock] = models.Pricing{
+		orderbook = models.Pricing{
 			Yes: make(map[int]models.OrderType),
 			No:  make(map[int]models.OrderType),
 		}
+		models.Orderbooks[payload.Stock] = orderbook
 	}
 
-	if models.Orderbooks[payload.Stock].Yes == nil {
-		models.Orderbooks[payload.Stock] = models.Pricing{
-			Yes: make(map[int]models.OrderType),
-		}
+	// Get the current orderbook state
+	currentPricing := models.Orderbooks[payload.Stock]
+
+	// Initialize Yes and No if they're nil
+	if currentPricing.Yes == nil {
+		currentPricing.Yes = make(map[int]models.OrderType)
+	}
+	if currentPricing.No == nil {
+		currentPricing.No = make(map[int]models.OrderType)
 	}
 
-	_, priceExists := models.Orderbooks[payload.Stock].Yes[payload.Price]
-	newPrice := 1000 - payload.Price
+	// Check for existing orders at this price
+	_, priceExists := currentPricing.Yes[payload.Price]
+
+	// If no matching YES orders exist, create inverse NO order
 	if !priceExists {
-		if _, noPriceExists := models.Orderbooks[payload.Stock].No[payload.Price]; !noPriceExists {
-			models.Orderbooks[payload.Stock].No[newPrice] = models.OrderType{
-				Total:  0,
-				Orders: make(map[string]models.Orders),
-			}
+		newPrice := 1000 - payload.Price
+
+		// Create new order
+		orderType := models.OrderType{
+			Total:  payload.Quantity,
+			Orders: make(map[string]models.Orders),
+		}
+		orderType.Orders[payload.UserId] = models.Orders{
+			Quantity: payload.Quantity,
+			Type:     "inverse",
 		}
 
-		newOrder, orderExists := models.Orderbooks[payload.Stock].No[newPrice].Orders[payload.UserId]
-		if orderExists {
-			newOrder.Quantity += payload.Quantity
-			newOrder.Type = "inverse"
+		// Update the No orderbook
+		currentPricing.No[newPrice] = orderType
 
-			existingOrder := models.Orderbooks[payload.Stock].No[newPrice]
-			existingOrder.Total += payload.Quantity
-			user.Locked += payload.Price * payload.Quantity
-			user.Balance -= payload.Price * payload.Quantity
+		// Save the updated pricing back to the main orderbook
+		models.Orderbooks[payload.Stock] = currentPricing
 
-			models.INR_BALANCES[payload.UserId] = user
-
-			c.JSON(http.StatusOK, gin.H{
-				"success": true,
-				"message": "Orderbook updated",
-				"data":    newOrder,
-			})
-			return
-		} else {
-			newBook := models.Orderbooks[payload.Stock].No[newPrice].Orders[payload.UserId]
-			newBook.Quantity += payload.Quantity
-			newBook.Type = "inverse"
-
-			copiedBook := models.Orderbooks[payload.Stock].No[newPrice]
-			copiedBook.Total += payload.Quantity
-			user.Locked += payload.Price * payload.Quantity
-			user.Balance -= payload.Price * payload.Quantity
-
-			models.INR_BALANCES[payload.UserId] = user
-
-			c.JSON(http.StatusOK, gin.H{
-				"success": true,
-				"message": "Orderbook updated",
-				"data":    models.Orderbooks[payload.Stock],
-			})
-			return
-		}
-	}
-
-	// Handling the orders in 'Yes'
-	if orders, ok := models.Orderbooks[payload.Stock].Yes[payload.Price]; ok {
-		totalAmount := payload.Quantity
-		for userId, order := range orders.Orders {
-			if totalAmount <= 0 {
-				break
-			}
-			currentQuantity := order.Quantity
-			subtraction := min(totalAmount, currentQuantity)
-			existingUser := models.INR_BALANCES[userId]
-			existingUser.Balance += payload.Price * subtraction
-
-			models.INR_BALANCES[userId] = existingUser
-
-			newUser := models.Orderbooks[payload.Stock].Yes[payload.Price].Orders[userId]
-			newUser.Quantity -= subtraction
-			totalAmount -= subtraction
-
-			if _, exists := models.Stock_Balances[payload.UserId]; !exists {
-				models.Stock_Balances[payload.UserId] = make(map[string]models.Stocksymbol)
-			}
-			if stock, exists := models.Stock_Balances[payload.UserId][payload.Stock]; !exists {
-				stock[payload.Stock] = models.OutCome{
-					Quantity: 0,
-					Locked:   0,
-				}
-			}
-			existingStock := models.Stock_Balances[payload.UserId][payload.Stock]["yes"]
-			existingStock.Quantity -= subtraction
-		}
-
-		orderbook := models.Orderbooks[payload.Stock].Yes[payload.Price]
-		orderbook.Total -= payload.Quantity - totalAmount
-		if orderbook.Total == 0 {
-			delete(models.Orderbooks[payload.Stock].Yes, payload.Price)
-		}
+		// Update user balance
+		user.Locked += payload.Price * payload.Quantity
 		user.Balance -= payload.Price * payload.Quantity
-		models.INR_BALANCES[payload.UserId] = user
+		Users[payload.UserId] = user
 
 		c.JSON(http.StatusOK, gin.H{
 			"success": true,
-			"message": "Orderbook updated",
+			"message": "Inverse order created",
 			"data":    models.Orderbooks[payload.Stock],
 		})
 		return
 	}
 
-	// If no matching order, deduct balance and lock funds
+	// Handle matching with existing YES orders
+	if orders, ok := currentPricing.Yes[payload.Price]; ok {
+		totalAmount := payload.Quantity
+		modifiedOrders := orders
+
+		for userId, order := range orders.Orders {
+			if totalAmount <= 0 {
+				break
+			}
+
+			currentQuantity := order.Quantity
+			matchQuantity := min(totalAmount, currentQuantity)
+
+			// Update seller's balance
+			seller := Users[userId]
+			seller.Balance += payload.Price * matchQuantity
+			seller.Locked -= payload.Price * matchQuantity
+			Users[userId] = seller
+
+			// Update order
+			if currentQuantity > matchQuantity {
+				modifiedOrders.Orders[userId] = models.Orders{
+					Quantity: currentQuantity - matchQuantity,
+					Type:     order.Type,
+				}
+			} else {
+				delete(modifiedOrders.Orders, userId)
+			}
+
+			totalAmount -= matchQuantity
+			modifiedOrders.Total -= matchQuantity
+
+			// Initialize buyer's stock balance if needed
+			stockBalances, exists := models.Stock_Balances[payload.Stock]
+			if !exists {
+				stockBalances = make(map[string]models.Stocksymbol)
+				models.Stock_Balances[payload.Stock] = stockBalances
+			}
+
+			userStocks, exists := stockBalances[payload.UserId]
+			if !exists {
+				userStocks = make(map[string]models.OutCome)
+				stockBalances[payload.UserId] = userStocks
+			}
+
+			// Update buyer's stock balance
+			currentOutcome := userStocks["yes"]
+			currentOutcome.Quantity += matchQuantity
+			userStocks["yes"] = currentOutcome
+			stockBalances[payload.UserId] = userStocks
+			models.Stock_Balances[payload.Stock] = stockBalances
+		}
+
+		// Update the orderbook
+		if modifiedOrders.Total > 0 {
+			currentPricing.Yes[payload.Price] = modifiedOrders
+		} else {
+			delete(currentPricing.Yes, payload.Price)
+		}
+		models.Orderbooks[payload.Stock] = currentPricing
+
+		// Update buyer's balance
+		user.Balance -= payload.Price * payload.Quantity
+		Users[payload.UserId] = user
+
+		c.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "Orders matched successfully",
+			"data":    models.Orderbooks[payload.Stock],
+		})
+		return
+	}
+
+	// If no matches, create a new NO inverse order
+	newPrice := 1000 - payload.Price
+	orderType := models.OrderType{
+		Total:  payload.Quantity,
+		Orders: make(map[string]models.Orders),
+	}
+	orderType.Orders[payload.UserId] = models.Orders{
+		Quantity: payload.Quantity,
+		Type:     "inverse",
+	}
+
+	currentPricing.No[newPrice] = orderType
+	models.Orderbooks[payload.Stock] = currentPricing
+
 	user.Balance -= payload.Price * payload.Quantity
 	user.Locked += payload.Price * payload.Quantity
-	models.INR_BALANCES[payload.UserId] = user
+	Users[payload.UserId] = user
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"message": "Orderbook updated",
+		"message": "Inverse order created",
 		"data":    models.Orderbooks[payload.Stock],
 	})
 }
 
-// Helper function to find minimum between two numbers
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -459,7 +487,7 @@ func BuyNo(c *gin.Context) {
 	}
 
 	// Log the user balance and requested order details
-	user := models.INR_BALANCES[payload.UserId]
+	user := Users[payload.UserId]
 	totalPrice := payload.Price * payload.Quantity
 	fmt.Printf("User balance: %d, Total price: %d\n", user.Balance, totalPrice)
 
@@ -511,7 +539,7 @@ func BuyNo(c *gin.Context) {
 	// Update the user's balance and locked funds
 	user.Locked += totalPrice
 	user.Balance -= totalPrice
-	models.INR_BALANCES[payload.UserId] = user
+	Users[payload.UserId] = user
 
 	// Return success response
 	c.JSON(http.StatusOK, gin.H{

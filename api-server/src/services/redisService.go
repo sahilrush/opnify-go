@@ -1,7 +1,7 @@
 package services
 
 import (
-	"context"
+	
 	"fmt"
 	"log"
 
@@ -9,7 +9,6 @@ import (
 )
 
 var (
-	ctx        = context.Background()
 	client     *redis.Client
 	subscriber *redis.Client
 )
